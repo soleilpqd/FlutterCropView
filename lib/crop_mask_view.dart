@@ -94,20 +94,16 @@ class CropMaskPainter extends CustomPainter {
     Paint paint = Paint();
     paint.color = backgroundColor ?? Colors.grey.withAlpha(128);
     paint.style = PaintingStyle.fill;
-    Path path1 = Path();
-    path1.addRect(Rect.fromLTWH(0, 0, size.width, size.height));
-    Path path2 = Path();
+    Path path = Path();
+    path.addRect(Rect.fromLTWH(0, 0, size.width, size.height));
     switch (shape) {
       case CropMaskShape.rectangle:
-        path2.addRect(cropWindow);
+        path.addRect(cropWindow);
       case CropMaskShape.oval:
-        path2.addOval(cropWindow);
+        path.addOval(cropWindow);
     }
-    Path path = Path.combine(
-      PathOperation.difference,
-      path1,
-      path2
-    );
+    path.close();
+    path.fillType = PathFillType.evenOdd;
     canvas.drawPath(path, paint);
     if (cropWindowBorder > 0) {
       paint.color = cropWindowBorderColor ?? Colors.white;
