@@ -1,5 +1,30 @@
+/*
+MIT License
+
+Copyright © 2024 DươngPQ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+ */
+
 library crop_view;
 
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/widgets.dart';
 import 'package:vector_math/vector_math_64.dart' as VecMath64;
@@ -27,6 +52,11 @@ class CropViewAdapter {
   double? _scale;
   double _minScale = 0.1;
   double _maxScale = 5;
+  double? _scaleRef;
+  // Scaling point at original coordinates
+  Offset? _scalingPoint;
+  // Scaling point on widget coordinates
+  Offset? _scalingRefPoint;
 
   void _setBounds(Size size) {
     if(_bounds != size) {
@@ -35,9 +65,49 @@ class CropViewAdapter {
     }
   }
 
+  Offset _calculateContentPoint(Offset localPoint) {
+    Offset contentOffset = _getTranslation();
+    Offset containerPositon = Offset(contentOffset.dx + localPoint.dx, contentOffset.dy + localPoint.dy);
+    return Offset(
+      (containerPositon.dx - _contentPosition.dx) / _scale!,
+      (containerPositon.dy - _contentPosition.dy) / _scale!
+    );
+  }
+
+  Offset _calculateContainerPoint(Offset contentPoint) {
+    Offset contentPosition = Offset(contentPoint.dx * _scale!, contentPoint.dy * _scale!);
+    return Offset(contentPosition.dx + _contentPosition.dx, contentPosition.dy + _contentPosition.dy);
+  }
+
+  void _moveContainerPointToLocalPoint(Offset containerPoint, Offset localPoint) {
+    double transX = max(containerPoint.dx - localPoint.dx, 0);
+    if (transX + _bounds.width > _containerSize.width) {
+      transX = _containerSize.width - _bounds.width;
+    }
+    double transY = max(containerPoint.dy - localPoint.dy, 0);
+    if (transY + _bounds.height > _containerSize.height) {
+      transY = _containerSize.height - _bounds.height;
+    }
+    Matrix4 transform = Matrix4.identity();
+    transform.translate(-transX, -transY);
+    _transformer.value = transform;
+  }
+
+  void _startScale(Offset point) {
+    _scaleRef = _scale;
+    _scalingRefPoint = point;
+    _scalingPoint = _calculateContentPoint(point);
+  }
+
+  void _endScale() {
+    _scaleRef = null;
+    _scalingPoint = null;
+    _scalingRefPoint = null;
+  }
+
   double _validateScale(double scale) {
-    if (scale < _minScale) scale = _minScale;
-    if (scale > _maxScale) scale = _maxScale;
+    if (scale < _minScale) return _minScale;
+    if (scale > _maxScale) return _maxScale;
     return scale;
   }
 
@@ -48,11 +118,13 @@ class CropViewAdapter {
   }
 
   void _changeScale(double diff) {
-    if (_scale == null) return;
-    double scale = _validateScale((_scale ?? 1) + diff);
-    if (_scale != scale) {
-      _scale = scale;
-      _calculateSizes();
+    if (_scale == null || _scaleRef == null) return;
+    double scale = _validateScale(_scaleRef! + diff);
+    _scale = scale;
+    _calculateSizes();
+    if (_scalingPoint != null && _scalingRefPoint != null) {
+      Offset point = _calculateContainerPoint(_scalingPoint!);
+      _moveContainerPointToLocalPoint(point, _scalingRefPoint!);
     }
   }
 
@@ -146,6 +218,7 @@ class CropView extends StatefulWidget {
   final double originWidth;
   /// Original width (simple words: image height)
   final double originHeight;
+  final bool doubleTapEnable;
 
   const CropView({
     super.key,
@@ -153,7 +226,8 @@ class CropView extends StatefulWidget {
     required this.mask,
     required this.adapter,
     required this.originWidth,
-    required this.originHeight
+    required this.originHeight,
+    this.doubleTapEnable = true
   });
 
   @override
@@ -170,9 +244,41 @@ class _CropViewState extends State<CropView> {
     widget.adapter._setState = setState;
   }
 
+  bool _isZooming(int count) {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return count == 2;
+    }
+    return count == 0;
+  }
+
+  void _gestureOnStart(ScaleStartDetails details) {
+    if (!_isZooming(details.pointerCount)) return;
+    widget.adapter._startScale(details.localFocalPoint);
+  }
+
   void _gestureOnNotified(ScaleUpdateDetails details) {
+    if (!_isZooming(details.pointerCount)) return;
     double scaleDiff = details.scale - 1;
     widget.adapter._changeScale(scaleDiff);
+  }
+
+  void _gestureOnEnd(ScaleEndDetails details) {
+    if (!_isZooming(details.pointerCount)) return;
+    widget.adapter._endScale();
+  }
+
+  void _doubleTapGestureOnDown(TapDownDetails details) {
+    widget.adapter._startScale(details.localPosition);
+  }
+
+  void _doubleTapGestureOnFire() {
+    if (!widget.doubleTapEnable || widget.adapter._scale == null) return;
+    if (widget.adapter._scale! < widget.adapter._maxScale) {
+      widget.adapter._changeScale(widget.adapter._maxScale - widget.adapter._scale!);
+    } else {
+      widget.adapter._changeScale(widget.adapter._minScale - widget.adapter._scale!);
+    }
+    widget.adapter._endScale();
   }
 
   @override
@@ -180,24 +286,30 @@ class _CropViewState extends State<CropView> {
     return LayoutBuilder(builder: (context, constraint) {
       widget.adapter._setBounds(Size(constraint.maxWidth, constraint.maxHeight));
       return Stack(fit: StackFit.expand, children: [
-        InteractiveViewer(
-          constrained: false,
-          minScale: 1,
-          maxScale: 1,
-          transformationController: widget.adapter._transformer,
-          onInteractionUpdate: _gestureOnNotified,
-          child: SizedBox(
-            width: widget.adapter._containerSize.width,
-            height: widget.adapter._containerSize.height,
-            child: Stack(fit: StackFit.expand, children: [
-              Positioned(
-                top: widget.adapter._contentPosition.dy,
-                left: widget.adapter._contentPosition.dx,
-                width: widget.adapter._contentSize.width,
-                height: widget.adapter._contentSize.height,
-                child: widget.child
-              )
-            ])
+        GestureDetector(
+          onDoubleTap: _doubleTapGestureOnFire,
+          onDoubleTapDown: _doubleTapGestureOnDown,
+          child: InteractiveViewer(
+            constrained: false,
+            minScale: 1,
+            maxScale: 1,
+            transformationController: widget.adapter._transformer,
+            onInteractionStart: _gestureOnStart,
+            onInteractionUpdate: _gestureOnNotified,
+            onInteractionEnd: _gestureOnEnd,
+            child: SizedBox(
+              width: widget.adapter._containerSize.width,
+              height: widget.adapter._containerSize.height,
+              child: Stack(fit: StackFit.expand, children: [
+                Positioned(
+                  top: widget.adapter._contentPosition.dy,
+                  left: widget.adapter._contentPosition.dx,
+                  width: widget.adapter._contentSize.width,
+                  height: widget.adapter._contentSize.height,
+                  child: widget.child
+                )
+              ])
+            )
           )
         ),
         IgnorePointer(child: widget.mask)
