@@ -184,10 +184,7 @@ class CropViewAdapter {
   }
 
   Offset _getTranslation() {
-    VecMath64.Vector3 translation = VecMath64.Vector3.zero();
-    VecMath64.Quaternion rotation = VecMath64.Quaternion.identity();
-    VecMath64.Vector3 scale = VecMath64.Vector3.zero();
-    _transformer.value.decompose(translation, rotation, scale);
+    VecMath64.Vector3 translation = _transformer.value.getTranslation();
     return Offset(max(0, -translation.x), max(0, -translation.y));
   }
 
