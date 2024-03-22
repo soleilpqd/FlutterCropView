@@ -29,6 +29,8 @@ import 'dart:math';
 import 'package:flutter/widgets.dart';
 import 'package:vector_math/vector_math_64.dart' as VecMath64;
 
+bool _isPhone() => Platform.isAndroid || Platform.isIOS;
+
 class CropViewAdapter {
 
   void Function(VoidCallback func) _setState = (_) {};
@@ -47,9 +49,11 @@ class CropViewAdapter {
   // Data need to be calculated
   Size _contentSize = Size.zero;
   Size _containerSize = Size.zero;
-  Offset _contentPosition = Offset.zero;
+  Offset _contentBoxPosition = Offset.zero;
+  Size _contentBoxSize = Size.zero;
   // Tracking data
   double? _scale;
+  double _rotation = 0;
   double _minScale = 0.1;
   double _maxScale = 5;
   double? _scaleRef;
@@ -57,6 +61,9 @@ class CropViewAdapter {
   Offset? _scalingPoint;
   // Scaling point on widget coordinates
   Offset? _scalingRefPoint;
+  double? _rotationRef;
+  Offset? _rotationPoint;
+  Offset? _rotationRefPoint;
 
   void _setBounds(Size size) {
     if(_bounds != size) {
@@ -69,14 +76,14 @@ class CropViewAdapter {
     Offset contentOffset = _getTranslation();
     Offset containerPositon = Offset(contentOffset.dx + localPoint.dx, contentOffset.dy + localPoint.dy);
     return Offset(
-      (containerPositon.dx - _contentPosition.dx) / _scale!,
-      (containerPositon.dy - _contentPosition.dy) / _scale!
+      (containerPositon.dx - _contentBoxPosition.dx) / _scale!,
+      (containerPositon.dy - _contentBoxPosition.dy) / _scale!
     );
   }
 
   Offset _calculateContainerPoint(Offset contentPoint) {
     Offset contentPosition = Offset(contentPoint.dx * _scale!, contentPoint.dy * _scale!);
-    return Offset(contentPosition.dx + _contentPosition.dx, contentPosition.dy + _contentPosition.dy);
+    return Offset(contentPosition.dx + _contentBoxPosition.dx, contentPosition.dy + _contentBoxPosition.dy);
   }
 
   void _moveContainerPointToLocalPoint(Offset containerPoint, Offset localPoint) {
@@ -93,10 +100,22 @@ class CropViewAdapter {
     _transformer.value = transform;
   }
 
+  void _startRotate(Offset point) {
+    _rotationRef = _rotation;
+    _rotationRefPoint = point;
+    _rotationPoint = _calculateContentPoint(point);
+  }
+
   void _startScale(Offset point) {
     _scaleRef = _scale;
     _scalingRefPoint = point;
     _scalingPoint = _calculateContentPoint(point);
+  }
+
+  void _endRotate() {
+    _rotationRef = null;
+    _rotationPoint = null;
+    _rotationRefPoint = null;
   }
 
   void _endScale() {
@@ -126,6 +145,16 @@ class CropViewAdapter {
       Offset point = _calculateContainerPoint(_scalingPoint!);
       _moveContainerPointToLocalPoint(point, _scalingRefPoint!);
     }
+  }
+
+  void _changeRoration(double diff) {
+    if (_rotationRef == null) return;
+    _rotation = _rotationRef! + diff;
+    _calculateSizes();
+  }
+
+  void _changeScaleRotation(double scaleDiff, double rotationDiff) {
+
   }
 
   void _validateTranslation() {
@@ -163,7 +192,8 @@ class CropViewAdapter {
       _contentSize.width + _bounds.width - cropWindow.size.width,
       _contentSize.height + _bounds.height - cropWindow.size.height
     );
-    _contentPosition = cropWindow.topLeft;
+    _contentBoxPosition = cropWindow.topLeft;
+    _contentBoxSize = _contentSize;
     if (expectedSize != _containerSize || oldContentSize != _contentSize) {
       _containerSize = expectedSize;
       if (refresh) {
@@ -184,10 +214,7 @@ class CropViewAdapter {
   }
 
   Offset _getTranslation() {
-    VecMath64.Vector3 translation = VecMath64.Vector3.zero();
-    VecMath64.Quaternion rotation = VecMath64.Quaternion.identity();
-    VecMath64.Vector3 scale = VecMath64.Vector3.zero();
-    _transformer.value.decompose(translation, rotation, scale);
+    VecMath64.Vector3 translation = _transformer.value.getTranslation();
     return Offset(max(0, -translation.x), max(0, -translation.y));
   }
 
@@ -237,6 +264,8 @@ class CropView extends StatefulWidget {
 
 class _CropViewState extends State<CropView> {
 
+  bool _isRotating = false;
+
   @override
   void initState() {
     super.initState();
@@ -244,27 +273,52 @@ class _CropViewState extends State<CropView> {
     widget.adapter._setState = setState;
   }
 
-  bool _isZooming(int count) {
-    if (Platform.isAndroid || Platform.isIOS) {
-      return count == 2;
-    }
-    return count == 0;
-  }
+  bool _isZooming(int count) => _isPhone() ? count == 2 : count == 0;
 
   void _gestureOnStart(ScaleStartDetails details) {
     if (!_isZooming(details.pointerCount)) return;
     widget.adapter._startScale(details.localFocalPoint);
+    if (_isPhone()) {
+      widget.adapter._startRotate(details.localFocalPoint);
+      _isRotating = true;
+    }
   }
 
   void _gestureOnNotified(ScaleUpdateDetails details) {
     if (!_isZooming(details.pointerCount)) return;
     double scaleDiff = details.scale - 1;
-    widget.adapter._changeScale(scaleDiff);
+    if (_isPhone()) {
+      widget.adapter._changeScaleRotation(scaleDiff, details.rotation);
+    } else {
+      if (_isRotating) {
+        widget.adapter._changeRoration(scaleDiff);
+      } else {
+        widget.adapter._changeScale(scaleDiff);
+      }
+    }
   }
 
   void _gestureOnEnd(ScaleEndDetails details) {
     if (!_isZooming(details.pointerCount)) return;
     widget.adapter._endScale();
+    if (_isPhone()) {
+      widget.adapter._endRotate();
+      _isRotating = false;
+    }
+  }
+
+  void _tapOnDown(TapDownDetails details) {
+    if (!_isPhone()) {
+      _isRotating = true;
+      widget.adapter._startRotate(details.localPosition);
+    }
+  }
+
+  void _tapOnUp(TapUpDetails details) {
+    if (!_isPhone()) {
+      _isRotating = false;
+      widget.adapter._endRotate();
+    }
   }
 
   void _doubleTapGestureOnDown(TapDownDetails details) {
@@ -289,6 +343,8 @@ class _CropViewState extends State<CropView> {
         GestureDetector(
           onDoubleTap: _doubleTapGestureOnFire,
           onDoubleTapDown: _doubleTapGestureOnDown,
+          onTapDown: _tapOnDown,
+          onTapUp: _tapOnUp,
           child: InteractiveViewer(
             constrained: false,
             minScale: 1,
@@ -302,11 +358,19 @@ class _CropViewState extends State<CropView> {
               height: widget.adapter._containerSize.height,
               child: Stack(fit: StackFit.expand, children: [
                 Positioned(
-                  top: widget.adapter._contentPosition.dy,
-                  left: widget.adapter._contentPosition.dx,
-                  width: widget.adapter._contentSize.width,
-                  height: widget.adapter._contentSize.height,
-                  child: widget.child
+                  top: widget.adapter._contentBoxPosition.dy,
+                  left: widget.adapter._contentBoxPosition.dx,
+                  width: widget.adapter._contentBoxSize.width,
+                  height: widget.adapter._contentBoxSize.height,
+                  child: Transform.rotate(
+                    angle: widget.adapter._rotation,
+                    alignment: Alignment.center,
+                    child: SizedBox(
+                      width: widget.adapter._contentSize.width,
+                      height: widget.adapter._contentSize.height,
+                      child: widget.child
+                    ),
+                  )
                 )
               ])
             )

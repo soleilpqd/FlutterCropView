@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
  */
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:crop_view/crop_view.dart';
 import 'package:crop_view/crop_mask_view.dart';
@@ -77,7 +79,17 @@ class _ImageCropPageState extends State<ImageCropPage> {
           mask: CropMaskView(painter: _maskPainter),
           child: FittedBox(fit: BoxFit.fill, child: _imageView!)
         ) :
-        const Center(child: Wrap(children: [CircularProgressIndicator()]))
+        Stack(
+          children: [
+            Center(child: Text(
+              (Platform.isAndroid || Platform.isIOS) ? "Use 2 fingers to zoom and rotate" : "Scroll mouse to zoom. Scroll with mouse down to rotate.",
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white)
+            )),
+            const Center(child: Wrap(children: [CircularProgressIndicator()]))
+          ]
+        )
+
     );
   }
 
