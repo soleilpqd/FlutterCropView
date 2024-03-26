@@ -95,7 +95,7 @@ class _ImageCropPageState extends State<ImageCropPage> {
         Stack(
           children: [
             Center(child: Text(
-              (Platform.isAndroid || Platform.isIOS) ? "Use 2 fingers to zoom and rotate.\nYou can also hold touch and drag to rotate." : "Scroll mouse to zoom.\nHold mouse click and drag to rotate.",
+              isPhone() ? "Use 2 fingers to zoom and rotate.\nYou can also hold touch and drag to rotate." : "Scroll mouse to zoom.\nHold mouse click and drag to rotate.",
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white)
             )),

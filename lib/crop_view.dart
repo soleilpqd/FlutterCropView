@@ -30,7 +30,13 @@ import 'package:flutter/widgets.dart';
 import 'package:vector_math/vector_math.dart';
 import 'package:vector_math/vector_math_64.dart' as VecMath64;
 
-bool _isPhone() => Platform.isAndroid || Platform.isIOS;
+bool isPhone() {
+  try {
+    return Platform.isAndroid || Platform.isIOS;
+  } catch (error) {
+    return false;
+  }
+}
 
 enum CropViewDoubleTapMode { none, quickScale, quickRotate }
 
@@ -376,7 +382,7 @@ class _CropViewState extends State<CropView> {
     widget.adapter._setState = setState;
   }
 
-  bool _validateGesture(int count) => _isPhone() ? count == 2 : count == 0;
+  bool _validateGesture(int count) => isPhone() ? count == 2 : count == 0;
 
   void _gestureOnStart(ScaleStartDetails details) {
     if (!_validateGesture(details.pointerCount)) return;
