@@ -22,8 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
  */
 
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:crop_view/crop_view.dart';
 import 'package:crop_view/crop_mask_view.dart';
