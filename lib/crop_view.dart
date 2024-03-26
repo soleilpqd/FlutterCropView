@@ -27,9 +27,12 @@ library crop_view;
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/widgets.dart';
+import 'package:vector_math/vector_math.dart';
 import 'package:vector_math/vector_math_64.dart' as VecMath64;
 
 bool _isPhone() => Platform.isAndroid || Platform.isIOS;
+
+enum CropViewDoubleTapMode { none, quickScale, quickRotate }
 
 class CropViewAdapter {
 
@@ -51,19 +54,21 @@ class CropViewAdapter {
   Size _containerSize = Size.zero;
   Offset _contentBoxPosition = Offset.zero;
   Size _contentBoxSize = Size.zero;
-  // Tracking data
+    // Tracking data
   double? _scale;
   double _rotation = 0;
   double _minScale = 0.1;
   double _maxScale = 5;
   double? _scaleRef;
   // Scaling point at original coordinates
-  Offset? _scalingPoint;
+  Offset? _gestureContentPoint;
   // Scaling point on widget coordinates
-  Offset? _scalingRefPoint;
+  Offset? _gestureLocalPoint;
   double? _rotationRef;
-  Offset? _rotationPoint;
-  Offset? _rotationRefPoint;
+  Offset? _longPressLast;
+  CropViewDoubleTapMode doubleTapMode = CropViewDoubleTapMode.none;
+
+  Offset get _localCenter => Offset(_bounds.width / 2, _bounds.height / 2);
 
   void _setBounds(Size size) {
     if(_bounds != size) {
@@ -75,15 +80,31 @@ class CropViewAdapter {
   Offset _calculateContentPoint(Offset localPoint) {
     Offset contentOffset = _getTranslation();
     Offset containerPositon = Offset(contentOffset.dx + localPoint.dx, contentOffset.dy + localPoint.dy);
-    return Offset(
-      (containerPositon.dx - _contentBoxPosition.dx) / _scale!,
-      (containerPositon.dy - _contentBoxPosition.dy) / _scale!
+    // Content box position from the center
+    Offset contentBoxPositon = Offset(
+      (containerPositon.dx - _contentBoxPosition.dx) - (_contentBoxSize.width / 2),
+      (containerPositon.dy - _contentBoxPosition.dy) - (_contentBoxSize.height / 2)
     );
+    VecMath64.Matrix4 rerotate = VecMath64.Matrix4.rotationZ(-_rotation);
+    contentBoxPositon = MatrixUtils.transformPoint(rerotate, contentBoxPositon);
+    contentBoxPositon = Offset(
+      (contentBoxPositon.dx + _contentSize.width / 2) / _scale!,
+      (contentBoxPositon.dy + _contentSize.height / 2) / _scale!
+    );
+    return contentBoxPositon;
   }
 
   Offset _calculateContainerPoint(Offset contentPoint) {
-    Offset contentPosition = Offset(contentPoint.dx * _scale!, contentPoint.dy * _scale!);
-    return Offset(contentPosition.dx + _contentBoxPosition.dx, contentPosition.dy + _contentBoxPosition.dy);
+    Offset contentPosition = Offset(
+      (contentPoint.dx - _originSize.width / 2) * _scale!,
+      (contentPoint.dy - _originSize.height / 2) * _scale!
+    );
+    VecMath64.Matrix4 rotation = VecMath64.Matrix4.rotationZ(_rotation);
+    contentPosition = MatrixUtils.transformPoint(rotation, contentPosition);
+    return Offset(
+      contentPosition.dx + _contentBoxSize.width / 2 + _contentBoxPosition.dx,
+      contentPosition.dy + _contentBoxSize.height / 2 + _contentBoxPosition.dy
+    );
   }
 
   void _moveContainerPointToLocalPoint(Offset containerPoint, Offset localPoint) {
@@ -95,33 +116,16 @@ class CropViewAdapter {
     if (transY + _bounds.height > _containerSize.height) {
       transY = _containerSize.height - _bounds.height;
     }
-    Matrix4 transform = Matrix4.identity();
+    VecMath64.Matrix4 transform = VecMath64.Matrix4.identity();
     transform.translate(-transX, -transY);
     _transformer.value = transform;
   }
 
-  void _startRotate(Offset point) {
-    _rotationRef = _rotation;
-    _rotationRefPoint = point;
-    _rotationPoint = _calculateContentPoint(point);
-  }
-
-  void _startScale(Offset point) {
-    _scaleRef = _scale;
-    _scalingRefPoint = point;
-    _scalingPoint = _calculateContentPoint(point);
-  }
-
-  void _endRotate() {
-    _rotationRef = null;
-    _rotationPoint = null;
-    _rotationRefPoint = null;
-  }
-
-  void _endScale() {
-    _scaleRef = null;
-    _scalingPoint = null;
-    _scalingRefPoint = null;
+  void _moveToRefPoint() {
+    if (_gestureLocalPoint != null && _gestureContentPoint != null) {
+      Offset point = _calculateContainerPoint(_gestureContentPoint!);
+      _moveContainerPointToLocalPoint(point, _gestureLocalPoint!);
+    }
   }
 
   double _validateScale(double scale) {
@@ -130,31 +134,41 @@ class CropViewAdapter {
     return scale;
   }
 
+  double _validateRotation(double value) {
+    double circle = (value.abs() / (2 * pi)).floorToDouble();
+    if (value < 0) {
+      return value + circle * 2 * pi;
+    }
+    return value - circle * 2 * pi;
+  }
+
   void _calculateScaleBoundary(Rect cropWindow) {
-    _minScale = max(cropWindow.width / _originSize.width, cropWindow.height / _originSize.height);
+    VecMath64.Matrix4 transform = VecMath64.Matrix4.rotationZ(_rotation);
+    Rect contentBox = Rect.fromLTWH(0, 0, _originSize.width, _originSize.height);
+    contentBox = MatrixUtils.transformRect(transform, contentBox);
+    _minScale = max(cropWindow.width / contentBox.width, cropWindow.height / contentBox.height);
     _maxScale = maxScale * _minScale;
     _scale = _validateScale(_scale ?? 0);
   }
 
-  void _changeScale(double diff) {
-    if (_scale == null || _scaleRef == null) return;
-    double scale = _validateScale(_scaleRef! + diff);
-    _scale = scale;
-    _calculateSizes();
-    if (_scalingPoint != null && _scalingRefPoint != null) {
-      Offset point = _calculateContainerPoint(_scalingPoint!);
-      _moveContainerPointToLocalPoint(point, _scalingRefPoint!);
-    }
-  }
-
+  // Long press
   void _changeRoration(double diff) {
-    if (_rotationRef == null) return;
-    _rotation = _rotationRef! + diff;
+    _rotation = _validateRotation(_rotation + diff);
     _calculateSizes();
+    _moveToRefPoint();
   }
 
+  // Scroll (desktop) or 2 fingers (phone)
   void _changeScaleRotation(double scaleDiff, double rotationDiff) {
-
+    if (_scale != null && _scaleRef != null) {
+      double scale = _validateScale(_scaleRef! + scaleDiff);
+      _scale = scale;
+    }
+    if (_rotationRef != null) {
+      _rotation = _validateRotation(_rotationRef! + rotationDiff);
+    }
+    _calculateSizes();
+    _moveToRefPoint();
   }
 
   void _validateTranslation() {
@@ -176,7 +190,7 @@ class CropViewAdapter {
     }
     if (!isInvalid) return;
     translation = Offset(translation.dx - dx, translation.dy - dy);
-    Matrix4 transform = Matrix4.identity();
+    VecMath64.Matrix4 transform = VecMath64.Matrix4.identity();
     transform.translate(-translation.dx, -translation.dy);
     _transformer.value = transform;
   }
@@ -185,15 +199,23 @@ class CropViewAdapter {
     final bool shouldMove = _scale == null;
     Rect cropWindow = calculateCropWindow(_bounds);
     _calculateScaleBoundary(cropWindow);
-    double scale = _scale ?? 1;
+    double scale = _scale!;
     Size oldContentSize = _contentSize;
     _contentSize = Size(_originSize.width * scale, _originSize.height * scale);
+    VecMath64.Matrix4 transform = VecMath64.Matrix4.rotationZ(_rotation);
+    Rect contentBox = Rect.fromLTWH(0, 0, _contentSize.width, _contentSize.height);
+    contentBox = MatrixUtils.transformRect(transform, contentBox);
     Size expectedSize = Size(
-      _contentSize.width + _bounds.width - cropWindow.size.width,
-      _contentSize.height + _bounds.height - cropWindow.size.height
+      contentBox.width + _bounds.width - cropWindow.size.width,
+      contentBox.height + _bounds.height - cropWindow.size.height
     );
-    _contentBoxPosition = cropWindow.topLeft;
-    _contentBoxSize = _contentSize;
+    // _contentBoxPosition = cropWindow.topLeft;
+    double boxSize = max(max(_contentSize.width, _contentSize.height), max(contentBox.size.width, contentBox.size.height));
+    _contentBoxSize = Size(boxSize, boxSize);
+    _contentBoxPosition = Offset(
+      cropWindow.left - (boxSize - contentBox.width) / 2,
+      cropWindow.top - (boxSize - contentBox.height) / 2,
+    );
     if (expectedSize != _containerSize || oldContentSize != _contentSize) {
       _containerSize = expectedSize;
       if (refresh) {
@@ -201,11 +223,11 @@ class CropViewAdapter {
       }
     }
     if (shouldMove) {
-      double dx = (_contentSize.width - cropWindow.width) / 2;
+      double dx = (contentBox.width - cropWindow.width) / 2;
       if (dx < 0) dx = 0;
-      double dy = (_contentSize.height - cropWindow.height) / 2;
+      double dy = (contentBox.height - cropWindow.height) / 2;
       if (dy < 0) dy = 0;
-      Matrix4 transform = Matrix4.identity();
+      VecMath64.Matrix4 transform = VecMath64.Matrix4.identity();
       transform.translate(-dx, -dy);
       _transformer.value = transform;
     } else {
@@ -218,16 +240,99 @@ class CropViewAdapter {
     return Offset(max(0, -translation.x), max(0, -translation.y));
   }
 
-  Rect getCropFrame() {
+  void _gestureStarts(Offset point) {
+    _gestureLocalPoint = point;
+    _gestureContentPoint = _calculateContentPoint(point);
+    _scaleRef = _scale;
+    _rotationRef = _rotation;
+  }
+
+  void _gestureNotifies(ScaleUpdateDetails details) {
+    double scaleDiff = details.scale - 1;
+    _changeScaleRotation(scaleDiff, details.rotation);
+  }
+
+  void _gestureEnds() {
+    _gestureLocalPoint = null;
+    _gestureContentPoint = null;
+    _scaleRef = null;
+    _rotationRef = null;
+  }
+
+  void _longPressStart(LongPressStartDetails details) {
+    _longPressLast = details.localPosition;
+    _gestureStarts(_localCenter);
+  }
+
+  void _longPressDrag(LongPressMoveUpdateDetails details) {
+    if (_longPressLast == null) return;
+    Offset center = _localCenter;
+    Offset origin = _longPressLast!;
+    Vector2 vec1 = Vector2(origin.dx - center.dx, origin.dy - center.dy);
+    Vector2 vec2 = Vector2(details.localPosition.dx - center.dx, details.localPosition.dy - center.dy);
+    double angle = atan2(vec1.x * vec2.y - vec1.y * vec2.x, vec1.x * vec2.x + vec1.y * vec2.y);
+    _changeRoration(angle);
+    _longPressLast = details.localPosition;
+  }
+
+  void _longPressEnd(LongPressEndDetails details) {
+    _longPressLast = null;
+    _gestureEnds();
+  }
+
+  void _doubleTapFires(Offset point) {
+    switch (doubleTapMode) {
+    case CropViewDoubleTapMode.none:
+      break;
+    case CropViewDoubleTapMode.quickScale:
+      _gestureStarts(point);
+      if (_scale! < _maxScale) {
+        _changeScaleRotation(_maxScale - _scaleRef!, 0);
+      } else {
+        _changeScaleRotation(_minScale - _scaleRef!, 0);
+      }
+      _gestureEnds();
+    case CropViewDoubleTapMode.quickRotate:
+      _gestureStarts(_localCenter);
+      double pi2 = pi / 2;
+      double round = pi * 2;
+      double pi23 = pi * 3 / 2;
+      if (_rotation < 0) {
+        if (_rotation >= -pi2) {
+          _changeRoration(-_rotation);
+        } else if (_rotation >= -pi) {
+          _changeRoration(-_rotation - pi2);
+        } else if (_rotation >= -pi23) {
+          _changeRoration(-_rotation - pi);
+        } else {
+          _changeRoration(-_rotation - pi23);
+        }
+      } else {
+        if (_rotation < pi2) {
+          _changeRoration(pi2 - _rotation);
+        } else if (_rotation < pi) {
+          _changeRoration(pi - _rotation);
+        } else if (_rotation < pi23) {
+          _changeRoration(pi23 - _rotation);
+        } else {
+          _changeRoration(round - _rotation);
+        }
+      }
+      _gestureEnds();
+    }
+  }
+
+  /// Get crop info: (rotation angle (radian), crop frame (after rotation))
+  (double, Rect) getCropFrame() {
     Offset translation = _getTranslation();
     Rect cropWindow = calculateCropWindow(_bounds);
     double scale = _scale ?? 1;
-    return Rect.fromLTWH(
+    return (_rotation, Rect.fromLTWH(
       (translation.dx / scale).floor().toDouble(),
       (translation.dy / scale).floor().toDouble(),
       (cropWindow.width / scale).floor().toDouble(),
       (cropWindow.height / scale).floor().toDouble()
-    );
+    ));
   }
 
 }
@@ -245,7 +350,6 @@ class CropView extends StatefulWidget {
   final double originWidth;
   /// Original width (simple words: image height)
   final double originHeight;
-  final bool doubleTapEnable;
 
   const CropView({
     super.key,
@@ -253,8 +357,7 @@ class CropView extends StatefulWidget {
     required this.mask,
     required this.adapter,
     required this.originWidth,
-    required this.originHeight,
-    this.doubleTapEnable = true
+    required this.originHeight
   });
 
   @override
@@ -264,7 +367,7 @@ class CropView extends StatefulWidget {
 
 class _CropViewState extends State<CropView> {
 
-  bool _isRotating = false;
+  Offset? _doubleTapPoint;
 
   @override
   void initState() {
@@ -273,66 +376,29 @@ class _CropViewState extends State<CropView> {
     widget.adapter._setState = setState;
   }
 
-  bool _isZooming(int count) => _isPhone() ? count == 2 : count == 0;
+  bool _validateGesture(int count) => _isPhone() ? count == 2 : count == 0;
 
   void _gestureOnStart(ScaleStartDetails details) {
-    if (!_isZooming(details.pointerCount)) return;
-    widget.adapter._startScale(details.localFocalPoint);
-    if (_isPhone()) {
-      widget.adapter._startRotate(details.localFocalPoint);
-      _isRotating = true;
-    }
+    if (!_validateGesture(details.pointerCount)) return;
+    widget.adapter._gestureStarts(details.localFocalPoint);
   }
 
   void _gestureOnNotified(ScaleUpdateDetails details) {
-    if (!_isZooming(details.pointerCount)) return;
-    double scaleDiff = details.scale - 1;
-    if (_isPhone()) {
-      widget.adapter._changeScaleRotation(scaleDiff, details.rotation);
-    } else {
-      if (_isRotating) {
-        widget.adapter._changeRoration(scaleDiff);
-      } else {
-        widget.adapter._changeScale(scaleDiff);
-      }
-    }
+    if (!_validateGesture(details.pointerCount)) return;
+    widget.adapter._gestureNotifies(details);
   }
 
   void _gestureOnEnd(ScaleEndDetails details) {
-    if (!_isZooming(details.pointerCount)) return;
-    widget.adapter._endScale();
-    if (_isPhone()) {
-      widget.adapter._endRotate();
-      _isRotating = false;
-    }
-  }
-
-  void _tapOnDown(TapDownDetails details) {
-    if (!_isPhone()) {
-      _isRotating = true;
-      widget.adapter._startRotate(details.localPosition);
-    }
-  }
-
-  void _tapOnUp(TapUpDetails details) {
-    if (!_isPhone()) {
-      _isRotating = false;
-      widget.adapter._endRotate();
-    }
+    if (!_validateGesture(details.pointerCount)) return;
+    widget.adapter._gestureEnds();
   }
 
   void _doubleTapGestureOnDown(TapDownDetails details) {
-    widget.adapter._startScale(details.localPosition);
+    _doubleTapPoint = details.localPosition;
   }
 
   void _doubleTapGestureOnFire() {
-    if (!widget.doubleTapEnable || widget.adapter._scale == null) return;
-    if (widget.adapter._scale! < widget.adapter._maxScale) {
-      widget.adapter._changeScale(widget.adapter._maxScale - widget.adapter._scale!);
-    } else {
-      widget.adapter._changeScale(widget.adapter._minScale - widget.adapter._scale!);
-    }
-    widget.adapter._endScale();
+    if (_doubleTapPoint != null) widget.adapter._doubleTapFires(_doubleTapPoint!);
   }
 
   @override
@@ -343,8 +409,9 @@ class _CropViewState extends State<CropView> {
         GestureDetector(
           onDoubleTap: _doubleTapGestureOnFire,
           onDoubleTapDown: _doubleTapGestureOnDown,
-          onTapDown: _tapOnDown,
-          onTapUp: _tapOnUp,
+          onLongPressStart:(details) => widget.adapter._longPressStart(details),
+          onLongPressMoveUpdate: (details) => widget.adapter._longPressDrag(details),
+          onLongPressEnd: (details) => widget.adapter._longPressEnd(details),
           child: InteractiveViewer(
             constrained: false,
             minScale: 1,
@@ -356,21 +423,21 @@ class _CropViewState extends State<CropView> {
             child: SizedBox(
               width: widget.adapter._containerSize.width,
               height: widget.adapter._containerSize.height,
-              child: Stack(fit: StackFit.expand, children: [
+              child: Stack(children: [
                 Positioned(
                   top: widget.adapter._contentBoxPosition.dy,
                   left: widget.adapter._contentBoxPosition.dx,
                   width: widget.adapter._contentBoxSize.width,
                   height: widget.adapter._contentBoxSize.height,
-                  child: Transform.rotate(
+                  child: Center(child: Transform.rotate(
                     angle: widget.adapter._rotation,
                     alignment: Alignment.center,
                     child: SizedBox(
                       width: widget.adapter._contentSize.width,
                       height: widget.adapter._contentSize.height,
                       child: widget.child
-                    ),
-                  )
+                    )
+                  ))
                 )
               ])
             )

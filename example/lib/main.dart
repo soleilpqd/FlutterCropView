@@ -134,9 +134,9 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  void _onCropImageSubmit(Rect cropFrame) {
+  void _onCropImageSubmit(double rotation, Rect cropFrame) {
     showLoading(context);
-    Isolations.cropImage(_image!, cropFrame).then((result) {
+    Isolations.cropImage(_image!, rotation, cropFrame).then((result) {
       setState(() {
         _image = result.$1;
         _uiImage = result.$2;
