@@ -2,7 +2,7 @@
 
 A simple view to allow user specifying a boundary on the target view (most common case is cropping image for avatar).
 
-This widget is made by Flutter widgets, so it can be used on platforms that Flutter can runs.
+This widget is made by Flutter widgets, so it can be used on platforms that Flutter can run.
 
 ## Features
 
