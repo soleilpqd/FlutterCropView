@@ -44,6 +44,10 @@ enum CropMaskPadding { relative, fixed }
 
 class CropMaskPainter extends CustomPainter {
 
+  // For development
+  final double _gridWeight = 0;
+  final double _gridSize = 10;
+
   /// Background color. Default: grey with alpha 128.
   final Color? backgroundColor;
   /// Shape of crop window. Default rectangle.
@@ -148,6 +152,52 @@ class CropMaskPainter extends CustomPainter {
       }
       canvas.drawPath(borderPath, paint);
     }
+    if (_gridSize > 0 && _gridWeight > 0) {
+      _paintGrid(canvas, size, cropWindow);
+    }
+  }
+
+  void _paintGrid(Canvas canvas, Size size, Rect cropWindow) {
+    Paint paint = Paint();
+    paint.color = (backgroundColor ?? Colors.grey).withAlpha(128);
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = _gridWeight;
+    double temp = size.width / 2;
+    for (double x = temp - (_gridSize * (temp ~/ _gridSize)); x < size.width; x += _gridSize) {
+      Path path = Path();
+      path.moveTo(x, 0);
+      path.lineTo(x, size.height);
+      path.close();
+      canvas.drawPath(path, paint);
+    }
+    temp = size.height / 2;
+    for (double y = temp - (_gridSize * (temp ~/ _gridSize)); y < size.height; y += _gridSize) {
+      Path path = Path();
+      path.moveTo(0, y);
+      path.lineTo(size.width, y);
+      path.close();
+      canvas.drawPath(path, paint);
+    }
+    paint.color = Colors.red.withAlpha(128);
+    paint.strokeWidth *= 2;
+    Path path = Path();
+    path.moveTo(size.width / 2 - _gridSize, size.height / 2);
+    path.lineTo(size.width / 2 + _gridSize, size.height / 2);
+    path.moveTo(size.width / 2, size.height / 2 - _gridSize);
+    path.lineTo(size.width / 2, size.height / 2 + _gridSize);
+    path.moveTo(cropWindow.left, cropWindow.top + _gridSize);
+    path.lineTo(cropWindow.left, cropWindow.top);
+    path.lineTo(cropWindow.left + _gridSize, cropWindow.top);
+    path.moveTo(cropWindow.left + cropWindow.width - _gridSize, cropWindow.top);
+    path.lineTo(cropWindow.left + cropWindow.width, cropWindow.top);
+    path.lineTo(cropWindow.left + cropWindow.width, cropWindow.top + _gridSize);
+    path.moveTo(cropWindow.left + cropWindow.width, cropWindow.top + cropWindow.height - _gridSize);
+    path.lineTo(cropWindow.left + cropWindow.width, cropWindow.top + cropWindow.height);
+    path.lineTo(cropWindow.left + cropWindow.width - _gridSize, cropWindow.top + cropWindow.height);
+    path.moveTo(cropWindow.left + _gridSize, cropWindow.top + cropWindow.height);
+    path.lineTo(cropWindow.left, cropWindow.top + cropWindow.height);
+    path.lineTo(cropWindow.left, cropWindow.top + cropWindow.height - _gridSize);
+    canvas.drawPath(path, paint);
   }
 
   @override

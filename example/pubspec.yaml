@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   image: any
   image_picker: any
+  vector_math: any
   crop_view:
     path: ..
 

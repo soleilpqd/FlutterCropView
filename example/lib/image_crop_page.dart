@@ -33,7 +33,7 @@ import 'package:myimagecrop/isolations.dart';
 class ImageCropPage extends StatefulWidget {
 
   final ImgImage image;
-  final void Function(Rect) onCompletion;
+  final void Function(double, Rect) onCompletion;
 
   const ImageCropPage({super.key, required this.image, required this.onCompletion});
 
@@ -59,12 +59,25 @@ class _ImageCropPageState extends State<ImageCropPage> {
 
   @override
   Widget build(BuildContext context) {
+    String text = "Double tap: ";
+    switch (_adapter.doubleTapMode) {
+    case CropViewDoubleTapMode.none:
+      text += "None";
+    case CropViewDoubleTapMode.quickScale:
+      text += "Quick Scale";
+    case CropViewDoubleTapMode.quickRotate:
+      text += "Quick Rotate";
+    }
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.lightBlue,
         title: const Text("Image crop", style: TextStyle(color: Colors.white)),
         actions: [
+          TextButton(
+            onPressed: _onChangeDoubleTapMode,
+            child: Text(text, style: const TextStyle(color: Colors.white))
+          ),
           IconButton(
             onPressed: _onSubmit,
             icon: const Icon(Icons.save),
@@ -79,21 +92,37 @@ class _ImageCropPageState extends State<ImageCropPage> {
           mask: CropMaskView(painter: _maskPainter),
           child: FittedBox(fit: BoxFit.fill, child: _imageView!)
         ) :
-        Stack(children: [
-          Center(child: Text(
-            (Platform.isIOS || Platform.isAndroid) ? "Use 2 fingers to zoom. Drag to move." : "Scroll mouse to zoom. Drag with left mouse to move.",
-            textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)
-          )),
-          const Center(child: Wrap(children: [CircularProgressIndicator()]))
-        ])
+        Stack(
+          children: [
+            Center(child: Text(
+              isPhone() ? "Use 2 fingers to zoom and rotate.\nYou can also hold touch and drag to rotate." : "Scroll mouse to zoom.\nHold mouse click and drag to rotate.",
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white)
+            )),
+            const Center(child: Wrap(children: [CircularProgressIndicator()]))
+          ]
+        )
 
     );
   }
 
+  void _onChangeDoubleTapMode() {
+    setState(() {
+      switch (_adapter.doubleTapMode) {
+      case CropViewDoubleTapMode.none:
+        _adapter.doubleTapMode = CropViewDoubleTapMode.quickScale;
+      case CropViewDoubleTapMode.quickScale:
+        _adapter.doubleTapMode = CropViewDoubleTapMode.quickRotate;
+      case CropViewDoubleTapMode.quickRotate:
+        _adapter.doubleTapMode = CropViewDoubleTapMode.none;
+      }
+    });
+  }
+
   void _onSubmit() {
-    Rect cropFrame = _adapter.getCropFrame();
+    (double, Rect) result = _adapter.getCropFrame();
     Navigator.of(context).pop();
-    widget.onCompletion(cropFrame);
+    widget.onCompletion(result.$1, result.$2);
   }
 
 }

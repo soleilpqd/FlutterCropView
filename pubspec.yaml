@@ -1,6 +1,6 @@
 name: crop_view
 description: "Flutter widget to allow end-user specifying crop Rect of a target frame (mostly image)"
-version: 0.0.1
+version: 1.0.1
 homepage:
 
 environment:

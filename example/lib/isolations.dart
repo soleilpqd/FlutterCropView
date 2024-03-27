@@ -27,6 +27,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image/image.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:myimagecrop/anti_confuse.dart';
+import 'package:vector_math/vector_math.dart';
 
 class Isolations {
 
@@ -39,10 +40,15 @@ class Isolations {
     return (image!, imageView);
   }, file);
 
-  static Future<(ImgImage, UiImage)> cropImage(ImgImage image, Rect cropFrame) => compute((args) {
-    Rect frame = args.$2;
-    ImgImage image = copyCrop(
-      args.$1,
+  static Future<(ImgImage, UiImage)> cropImage(ImgImage image, double rotation, Rect cropFrame) => compute((args) {
+    double rotation = args.$2;
+    Rect frame = args.$3;
+    ImgImage image = args.$1;
+    if (rotation != 0) {
+      image = copyRotate(image, angle: degrees(rotation));
+    }
+    image = copyCrop(
+      image,
       x: frame.left.toInt(),
       y: frame.top.toInt(),
       width: frame.width.toInt(),
@@ -50,6 +56,6 @@ class Isolations {
     );
     UiImage uiImage = UiImage.memory(encodePng(image));
     return (image, uiImage);
-  }, (image, cropFrame));
+  }, (image, rotation, cropFrame));
 
 }
