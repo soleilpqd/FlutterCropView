@@ -2,14 +2,14 @@
 
 A simple view to allow user specifying a boundary on the target view (most common case is cropping image for avatar).
 
-This widget is made by Flutter widgets, so it can be used on platforms that Flutter can runs.
+This widget is made by Flutter widgets, so it can be used on platforms that Flutter can run.
 
 ## Features
 
 ![example](example.png)
 
 - The crop window is fixed.
-- User can zoom in/out the target view, scroll around to fill the target view into the crop window.
+- User can zoom in/out the target view (pinch/stretch with 2 fingers on phone, or mouse scroll on other platforms), drag (pan) around to fill the target view into the crop window.
 - The result is the frame (coordinates) of the boundary on normal size of target view.
 
 ## Usage
@@ -41,19 +41,19 @@ Widget build(BuildContext context) {
   - `mask`: a widget to display as crop window.
   - `child`: your target view / image.
 
-> `CropView` layout is below:
+> `CropView` layout is about below:
 >```
 > Stack(
 >   InteractiveViewer(
->     SizedBox(
+>     Stack(Positioned(
 >       YourTargetView
->     )
+>     ))
 >   ),
 >   MaskView
 > )
 >```
 >
-> The `SizedBox` size will be changed following user zooming. So make sure your target view responsive (as example above, put your `Image` inside `FittedBox`).
+> The `Positioned` size will be changed following user zooming. So make sure your target view responsive (as example above, put your `Image` inside `FittedBox`).
 - Mask view: widget to display the crop window. You can make your own widget or use the simple `CropMaskView(painter: _painter)`, which `_painter` is a `CropMaskPainter extends CustomPainter`, supporting drawing 2 shapes (rectangle / oval) of crop window with or without border at the center of widget.
 - To get crop frame, use `CropViewAdapter.getCropFrame()`:
 ```

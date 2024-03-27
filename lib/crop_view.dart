@@ -29,6 +29,24 @@ import 'dart:math';
 import 'package:flutter/widgets.dart';
 import 'package:vector_math/vector_math_64.dart' as VecMath64;
 
+/*
+Layout of crop view
+
++-ScrollView (InteractiveViewer)----------------------+
+|+-Container view (SizedBox)-------------------------+|
+||                                                   ||
+||  +-Content View (Stack > Positioned)-----------+  ||
+||  | <target view>                               |  ||
+||  +---------------------------------------------+  ||
+||                                                   ||
+|+---------------------------------------------------+|
++-----------------------------------------------------+
+
+- Size of Content View is Original Size * current scale level.
+- Size of Container View and position of Content View depend on the crop window (so user can not scroll/drag the Content View outsize the crop window).
+(that why we zoom by manualy setting the size of Content View instead of using scaling feature of InteractiveViewer).
+*/
+
 class CropViewAdapter {
 
   void Function(VoidCallback func) _setState = (_) {};
@@ -42,29 +60,44 @@ class CropViewAdapter {
   CropViewAdapter({this.maxScale = 5, required this.calculateCropWindow});
 
   // Base data
+  /// Original size of target view.
   Size _originSize = Size.zero;
+  /// Current size of this view.
   Size _bounds = Size.zero;
   // Data need to be calculated
+  /// Size of Content View.
   Size _contentSize = Size.zero;
+  /// Size of Container View.
   Size _containerSize = Size.zero;
+  /// Positon of Content View.
   Offset _contentPosition = Offset.zero;
   // Tracking data
+  /// Current zoom level.
   double? _scale;
+   /// Minimum value for _scale; depending on `_originSize`, current `_bounds` and crop window.
   double _minScale = 0.1;
+  /// Maximum value for _scale; depending on crop window, `_originSize` and `maxScale`.
   double _maxScale = 5;
+  /// Scale reference (value of `_scale` when user starts the pinch/stretch gesture).
   double? _scaleRef;
-  // Scaling point at original coordinates
-  Offset? _scalingPoint;
-  // Scaling point on widget coordinates
-  Offset? _scalingRefPoint;
+  /// Scaling reference point (point when user starts the gesture) at original coordinates.
+  Offset? _gestureContentPoint;
+  /// Scaling reference point (point when user starts the gesture) on widget coordinates.
+  Offset? _gestureLocalPoint;
+
+  Offset get _localCenter => Offset(_bounds.width / 2, _bounds.height / 2);
 
   void _setBounds(Size size) {
     if(_bounds != size) {
+      Offset? refPoint;
+      if (_scale != null) refPoint = _calculateContentPoint(_localCenter);
       _bounds = size;
       _calculateSizes(refresh: false);
+      _moveToRefPoint(_localCenter, refPoint);
     }
   }
 
+  // Calculate location on Target View coordinates (Content View without scale) from point on widget coordinate
   Offset _calculateContentPoint(Offset localPoint) {
     Offset contentOffset = _getTranslation();
     Offset containerPositon = Offset(contentOffset.dx + localPoint.dx, contentOffset.dy + localPoint.dy);
@@ -74,11 +107,13 @@ class CropViewAdapter {
     );
   }
 
+  // Calculate location on Container View coordinates from point on Target View coordinates (Content View without scale or rotate)
   Offset _calculateContainerPoint(Offset contentPoint) {
     Offset contentPosition = Offset(contentPoint.dx * _scale!, contentPoint.dy * _scale!);
     return Offset(contentPosition.dx + _contentPosition.dx, contentPosition.dy + _contentPosition.dy);
   }
 
+  // Set Content View positon to move the point on Container View to the point on widget as close as posible
   void _moveContainerPointToLocalPoint(Offset containerPoint, Offset localPoint) {
     double transX = max(containerPoint.dx - localPoint.dx, 0);
     if (transX + _bounds.width > _containerSize.width) {
@@ -93,16 +128,25 @@ class CropViewAdapter {
     _transformer.value = transform;
   }
 
+  // After some actions (eg. rotate or zoom), content view position may change.
+  // So we should move the reference point on target view back to the reference poin on widget.
+  void _moveToRefPoint(Offset? localRefPoint, Offset? contentRefPoint) {
+    if (localRefPoint != null && contentRefPoint != null) {
+      Offset point = _calculateContainerPoint(contentRefPoint);
+      _moveContainerPointToLocalPoint(point, localRefPoint);
+    }
+  }
+
   void _startScale(Offset point) {
     _scaleRef = _scale;
-    _scalingRefPoint = point;
-    _scalingPoint = _calculateContentPoint(point);
+    _gestureLocalPoint = point;
+    _gestureContentPoint = _calculateContentPoint(point);
   }
 
   void _endScale() {
     _scaleRef = null;
-    _scalingPoint = null;
-    _scalingRefPoint = null;
+    _gestureLocalPoint = null;
+    _gestureContentPoint = null;
   }
 
   double _validateScale(double scale) {
@@ -122,10 +166,7 @@ class CropViewAdapter {
     double scale = _validateScale(_scaleRef! + diff);
     _scale = scale;
     _calculateSizes();
-    if (_scalingPoint != null && _scalingRefPoint != null) {
-      Offset point = _calculateContainerPoint(_scalingPoint!);
-      _moveContainerPointToLocalPoint(point, _scalingRefPoint!);
-    }
+    _moveToRefPoint(_gestureLocalPoint, _gestureContentPoint);
   }
 
   void _validateTranslation() {
